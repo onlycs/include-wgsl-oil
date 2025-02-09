@@ -1,4 +1,4 @@
-#[include_wgsl_oil::include_wgsl_oil("definitions.wgsl")]
+#[include_wgsl_oil::include_wgsl_oil("examples/exported_structs/definitions.wgsl")]
 mod definitions_shader {}
 type ExportedStruct = definitions_shader::types::MyFooStruct;
 

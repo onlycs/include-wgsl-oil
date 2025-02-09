@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
+    path::PathBuf,
 };
 
 use naga_oil::compose::Composer;
@@ -27,6 +28,7 @@ impl Sourcecode {
     pub(crate) fn new(
         invocation_path: AbsoluteRustFilePathBuf,
         requested_path_input: String,
+        include_path: Option<PathBuf>,
     ) -> Self {
         // Interpret as relative to invoking file
         let source_path = invocation_path
@@ -62,7 +64,12 @@ impl Sourcecode {
         let root_src = std::fs::read_to_string(&*source_path).expect("asserted was file");
         let (_, exports) = strip_exports(&root_src);
 
-        let project_root = invocation_path.get_source_rust_root();
+        let mut project_root = invocation_path.get_source_rust_root();
+
+        if let Some(include_path) = include_path {
+            project_root = Some(AbsoluteRustRootPathBuf::new(include_path));
+        }
+
         Self {
             requested_path_input,
             source_path,

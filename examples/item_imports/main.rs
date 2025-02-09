@@ -1,4 +1,4 @@
-#[include_wgsl_oil::include_wgsl_oil("main.wgsl")]
+#[include_wgsl_oil::include_wgsl_oil("examples/item_imports/main.wgsl")]
 mod main_shader {}
 
 fn main() {

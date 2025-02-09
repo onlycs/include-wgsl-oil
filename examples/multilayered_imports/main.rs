@@ -1,6 +1,6 @@
-#[include_wgsl_oil::include_wgsl_oil("shaders/vertex_shader.wgsl")]
+#[include_wgsl_oil::include_wgsl_oil("examples/multilayered_imports/shaders/vertex_shader.wgsl")]
 mod vertex_shader {}
-#[include_wgsl_oil::include_wgsl_oil("shaders/fragment_shader.wgsl")]
+#[include_wgsl_oil::include_wgsl_oil("examples/multilayered_imports/shaders/fragment_shader.wgsl")]
 mod fragment_shader {}
 
 fn main() {

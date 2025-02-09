@@ -71,10 +71,10 @@ pub fn include_wgsl_oil(
     let root = std::env::var("CARGO_MANIFEST_DIR").expect("proc macros should be run using cargo");
 
     if !requested_path.starts_with('/') {
-        requested_path = format!("{root}/{}", requested_path);
+        requested_path = format!("{root}/{requested_path}");
     }
 
-    let invocation_path = match input.requested_invocation {
+    let include_path = match input.requested_invocation {
         Some(requested_invocation) => {
             let invocation_path = if requested_invocation.starts_with('/') {
                 requested_invocation
@@ -82,12 +82,22 @@ pub fn include_wgsl_oil(
                 format!("{root}/{}", requested_invocation)
             };
 
-            AbsoluteRustFilePathBuf::new(PathBuf::from(invocation_path))
+            Some(PathBuf::from(invocation_path))
         }
-        None => AbsoluteRustFilePathBuf::new(Span::call_site().source_file().path()),
+        None => None,
     };
 
-    let sourcecode = Sourcecode::new(invocation_path, requested_path);
+    let path = Span::call_site().source_file().path();
+    let rel = path.to_str().unwrap();
+    let abs = PathBuf::from(format!("{root}/{rel}"));
+
+    eprintln!("abs: {:?}", abs);
+
+    let sourcecode = Sourcecode::new(
+        AbsoluteRustFilePathBuf::new(abs),
+        requested_path,
+        include_path,
+    );
     let mut result = sourcecode.complete();
 
     result.validate();
