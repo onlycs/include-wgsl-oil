@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![feature(proc_macro_span)]
 
 mod error;
 mod exports;
@@ -11,41 +12,34 @@ mod source;
 use std::{fs::File, io::Read, path::PathBuf};
 
 use files::AbsoluteRustFilePathBuf;
+use proc_macro::Span;
 use quote::ToTokens;
 use source::Sourcecode;
-use syn::token::Brace;
+use syn::{
+    parse::{Parse, ParseStream},
+    token::Brace,
+    Token,
+};
 
-// Hacky polyfill for `proc_macro::Span::source_file`
-fn find_me(root: &str, pattern: &str) -> Option<PathBuf> {
-    let mut options = Vec::new();
+struct MacroInput {
+    wgsl_path: String,
+    requested_invocation: Option<String>,
+}
 
-    for path in glob::glob(&std::path::Path::new(root).join("**/*.rs").to_string_lossy())
-        .unwrap()
-        .flatten()
-    {
-        if let Ok(mut f) = File::open(&path) {
-            let mut contents = String::new();
-            f.read_to_string(&mut contents).ok();
-            if contents.contains(pattern) {
-                options.push(path.to_owned());
-            }
-        }
-    }
+impl Parse for MacroInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let a = input.parse::<syn::LitStr>()?;
+        let b = if input.is_empty() {
+            None
+        } else {
+            input.parse::<Token![,]>()?;
+            Some(input.parse::<syn::LitStr>()?.value())
+        };
 
-    match options.as_slice() {
-        [] => None,
-        [v] => Some(v.clone()),
-        _ => panic!(
-            "found more than one contender for macro invocation location. \
-            This won't be an issue once `proc_macro_span` is stabalized, \
-            but until then each instance of the `include_wgsl_oil` \
-            must be present in the source text, and each must have a unique argument. \
-            found locations: {:?}",
-            options
-                .into_iter()
-                .map(|path| format!("`{}`", path.display()))
-                .collect::<Vec<String>>()
-        ),
+        Ok(Self {
+            wgsl_path: a.value(),
+            requested_invocation: b,
+        })
     }
 }
 
@@ -71,23 +65,29 @@ pub fn include_wgsl_oil(
     }
     module.semi = None;
 
-    let requested_path = syn::parse_macro_input!(path as syn::LitStr);
-    let requested_path = requested_path.value();
+    let input = syn::parse_macro_input!(path as MacroInput);
+    let mut requested_path = input.wgsl_path;
 
     let root = std::env::var("CARGO_MANIFEST_DIR").expect("proc macros should be run using cargo");
-    let invocation_path = match find_me(&root, &format!("\"{}\"", requested_path)) {
-        Some(invocation_path) => AbsoluteRustFilePathBuf::new(invocation_path),
-        None => {
-            panic!(
-                "could not find invocation point - maybe it was in a macro? This won't be an issue once \
-                `proc_macro_span` is stabalized, but until then each instance of the `include_wgsl_oil` \
-                must be present in the source text, and each must have a unique argument."
-            )
+
+    if !requested_path.starts_with('/') {
+        requested_path = format!("{root}/{}", requested_path);
+    }
+
+    let invocation_path = match input.requested_invocation {
+        Some(requested_invocation) => {
+            let invocation_path = if requested_invocation.starts_with('/') {
+                requested_invocation
+            } else {
+                format!("{root}/{}", requested_invocation)
+            };
+
+            AbsoluteRustFilePathBuf::new(PathBuf::from(invocation_path))
         }
+        None => AbsoluteRustFilePathBuf::new(Span::call_site().source_file().path()),
     };
 
     let sourcecode = Sourcecode::new(invocation_path, requested_path);
-
     let mut result = sourcecode.complete();
 
     result.validate();
