@@ -83,6 +83,7 @@ impl ShaderResult {
             gen_glam: cfg!(feature = "glam"),
             gen_encase: cfg!(feature = "encase"),
             gen_naga: cfg!(feature = "naga"),
+            derive_bytemuck: cfg!(feature = "bytemuck"),
         });
         items.append(&mut module_items);
 
