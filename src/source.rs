@@ -1,16 +1,18 @@
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
+    fs,
     path::PathBuf,
 };
 
-use naga_oil::compose::Composer;
+use naga_oil::compose::{ComposableModuleDescriptor, Composer};
 
 use crate::{
     exports::{strip_exports, Export},
     files::{AbsoluteRustFilePathBuf, AbsoluteRustRootPathBuf, AbsoluteWGSLFilePathBuf},
     imports::ImportOrder,
     result::ShaderResult,
+    Constants, MacroInput,
 };
 
 /// Shader sourcecode generated from the token stream provided
@@ -22,14 +24,18 @@ pub(crate) struct Sourcecode {
     project_root: Option<AbsoluteRustRootPathBuf>,
     errors: Vec<String>,
     dependents: Vec<AbsoluteWGSLFilePathBuf>,
+    includes: HashMap<String, (Vec<String>, PathBuf, String)>,
+    constants: Constants,
 }
 
 impl Sourcecode {
-    pub(crate) fn new(
-        invocation_path: AbsoluteRustFilePathBuf,
-        requested_path_input: String,
-        include_path: Option<PathBuf>,
-    ) -> Self {
+    pub(crate) fn new(invocation_path: AbsoluteRustFilePathBuf, ins: MacroInput) -> Self {
+        let MacroInput {
+            wgsl_path: requested_path_input,
+            includes,
+            constants,
+        } = ins;
+
         // Interpret as relative to invoking file
         let source_path = invocation_path
             .parent()
@@ -64,11 +70,7 @@ impl Sourcecode {
         let root_src = std::fs::read_to_string(&*source_path).expect("asserted was file");
         let (_, exports) = strip_exports(&root_src);
 
-        let mut project_root = invocation_path.get_source_rust_root();
-
-        if let Some(include_path) = include_path {
-            project_root = Some(AbsoluteRustRootPathBuf::new(include_path));
-        }
+        let project_root = invocation_path.get_source_rust_root();
 
         Self {
             requested_path_input,
@@ -78,6 +80,8 @@ impl Sourcecode {
             exports,
             errors: Vec::new(),
             dependents: Vec::new(),
+            includes,
+            constants,
         }
     }
 
@@ -105,6 +109,56 @@ impl Sourcecode {
                 "__DEBUG".to_string(),
                 naga_oil::compose::ShaderDefValue::Bool(true),
             );
+        }
+
+        for (a, b) in &self.constants.inner {
+            shader_defs.insert(
+                a.clone(),
+                naga_oil::compose::ShaderDefValue::from(b.clone()),
+            );
+        }
+
+        let (_, reqs, _) = naga_oil::compose::get_preprocessor_data(
+            fs::read_to_string(self.requested_path()).ok()?.as_str(),
+        );
+
+        let mut reqs = reqs
+            .into_iter()
+            .map(|req| req.import)
+            .collect::<HashSet<_>>();
+
+        while !reqs.is_empty() {
+            let mut next_reqs = HashSet::default();
+
+            for (req, (subreqs, path, src)) in reqs
+                .iter()
+                .filter_map(|r| self.includes.get(r).map(|n| (r, n)))
+            {
+                if composer.contains_module(req) {
+                    continue;
+                }
+
+                if subreqs.iter().all(|sr| composer.contains_module(&sr)) {
+                    composer
+                        .add_composable_module(ComposableModuleDescriptor {
+                            source: &src,
+                            file_path: &path.to_string_lossy(),
+                            language: naga_oil::compose::ShaderLanguage::Wgsl,
+                            as_name: Some(req.clone()),
+                            ..Default::default()
+                        })
+                        .unwrap();
+                }
+                next_reqs.extend(
+                    subreqs
+                        .iter()
+                        .cloned()
+                        .filter(|r| !composer.contains_module(r)),
+                );
+                next_reqs.insert(req.clone());
+            }
+
+            reqs = next_reqs;
         }
 
         // Calculate import order
